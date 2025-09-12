@@ -15,6 +15,7 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 from alphagenome.data import gene_annotation
+from alphagenome.data import genome
 import numpy as np
 import pandas as pd
 
@@ -112,12 +113,12 @@ class GetGeneIntervalTest(parameterized.TestCase):
       dict(
           gene_symbol='FOO',
           gene_id=None,
-          expected_error='No interval found for gene "FOO".',
+          expected_error=r'No interval found for gene\(s\): FOO.',
       ),
       dict(
           gene_id='BAR',
           gene_symbol=None,
-          expected_error='No interval found for gene "BAR".',
+          expected_error=r'No interval found for gene\(s\): BAR.',
       ),
       dict(
           gene_id=None,
@@ -127,7 +128,7 @@ class GetGeneIntervalTest(parameterized.TestCase):
       dict(
           gene_id='ENSG01.1',
           gene_symbol=None,
-          expected_error='Multiple intervals found for gene "ENSG01.1".',
+          expected_error=r'Multiple intervals found for gene\(s\): ENSG01.1.',
       ),
   ])
   def test_invalid_gene_raises_error(
@@ -145,6 +146,96 @@ class GetGeneIntervalTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, expected_error):
       gene_annotation.get_gene_interval(
           gtf=gtf, gene_symbol=gene_symbol, gene_id=gene_id
+      )
+
+
+class GetGeneIntervalsTest(parameterized.TestCase):
+
+  @parameterized.parameters([
+      dict(
+          gene_symbols=['TP53', 'EGFR', 'TNF'],
+          expected_intervals=[
+              genome.Interval('chr1', 101, 200, '+', 'TP53'),
+              genome.Interval('chr2', 150, 200, '+', 'EGFR'),
+              genome.Interval('chr3', 101, 200, '-', 'TNF'),
+          ],
+      ),
+      dict(
+          gene_symbols=['tp53', 'EGFR'],  # Should handle case differences.
+          expected_intervals=[
+              genome.Interval('chr1', 101, 200, '+', 'tp53'),
+              genome.Interval('chr2', 150, 200, '+', 'EGFR'),
+          ],
+      ),
+      dict(
+          gene_ids=['ENSG01', 'ENSG03.1'],  # Should handle missing patch.
+          expected_intervals=[
+              genome.Interval('chr1', 101, 200, '+', 'ENSG01'),
+              genome.Interval('chr3', 101, 200, '-', 'ENSG03.1'),
+          ],
+      ),
+      dict(
+          gene_symbols=['TNF', 'TP53'],  # Test order is preserved.
+          expected_intervals=[
+              genome.Interval('chr3', 101, 200, '-', 'TNF'),
+              genome.Interval('chr1', 101, 200, '+', 'TP53'),
+          ],
+      ),
+      dict(
+          gene_symbols=['TP53', 'EGFR', 'TP53'],  # Test duplicates in input.
+          expected_intervals=[
+              genome.Interval('chr1', 101, 200, '+', 'TP53'),
+              genome.Interval('chr2', 150, 200, '+', 'EGFR'),
+              genome.Interval('chr1', 101, 200, '+', 'TP53'),
+          ],
+      ),
+  ])
+  def test_get_gene_intervals(
+      self, expected_intervals, gene_symbols=None, gene_ids=None
+  ):
+    gtf = pd.DataFrame({
+        'gene_id': ['ENSG01.1', 'ENSG02.2', 'ENSG03.1'],
+        'gene_name': ['TP53', 'EGFR', 'TNF'],
+        'Chromosome': ['chr1', 'chr2', 'chr3'],
+        'Start': [101, 150, 101],
+        'End': [200, 200, 200],
+        'Strand': ['+', '+', '-'],
+        'Feature': 'gene',
+    })
+    intervals = gene_annotation.get_gene_intervals(
+        gtf=gtf, gene_symbols=gene_symbols, gene_ids=gene_ids
+    )
+    self.assertSequenceEqual(intervals, expected_intervals)
+
+  @parameterized.parameters([
+      dict(
+          gene_symbols=['FOO', 'BAR'],
+          gene_ids=None,
+          expected_error=r'No interval found for gene\(s\): BAR, FOO.',
+      ),
+      dict(
+          gene_ids=['ENSG01.1', 'ENSG03'],
+          gene_symbols=None,
+          expected_error=(
+              r'Multiple intervals found for gene\(s\): ENSG01.1, ENSG03.'
+          ),
+      ),
+  ])
+  def test_invalid_genes_raise_error(
+      self, gene_symbols, gene_ids, expected_error
+  ):
+    gtf = pd.DataFrame({
+        'gene_id': ['ENSG01.1', 'ENSG01.1', 'ENSG03.1', 'ENSG03.1'],
+        'gene_name': ['TP53', 'EGFR', 'TNF', 'CD8A'],
+        'Chromosome': ['chr1', 'chr2', 'chr3', 'chr4'],
+        'Start': [101, 150, 101, 101],
+        'End': [200, 200, 200, 200],
+        'Strand': ['+', '+', '-', '+'],
+        'Feature': 'gene',
+    })
+    with self.assertRaisesRegex(ValueError, expected_error):
+      gene_annotation.get_gene_intervals(
+          gtf=gtf, gene_symbols=gene_symbols, gene_ids=gene_ids
       )
 
 

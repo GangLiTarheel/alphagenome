@@ -49,6 +49,8 @@ Classes and utilities for manipulating genomics data.
     data.gene_annotation.filter_protein_coding
     data.gene_annotation.filter_to_longest_transcript
     data.gene_annotation.filter_transcript_support_level
+    data.gene_annotation.get_gene_interval
+    data.gene_annotation.get_gene_intervals
 ```
 
 ## Ontology

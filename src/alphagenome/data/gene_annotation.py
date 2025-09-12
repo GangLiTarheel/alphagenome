@@ -306,6 +306,89 @@ def upgrade_annotation_ids(
   )
 
 
+def get_gene_intervals(
+    gtf: pd.DataFrame,
+    gene_symbols: Sequence[str] | None = None,
+    gene_ids: Sequence[str] | None = None,
+) -> list[genome.Interval]:
+  """Returns a list of stranded `genome.Interval`s for the given identifiers.
+
+  Args:
+    gtf: pd.DataFrame of GENCODE GTF entries. Must contain columns 'Feature',
+      'gene_name', 'gene_id', 'Chromosome', 'Start', 'End', and 'Strand'.
+    gene_symbols: A sequence of gene names or gene symbols (e.g., ['EGFR',
+      'TNF', 'TP53']). Matching is case-insensitive.
+    gene_ids: A sequence of Ensembl gene IDs, which can be patched (e.g.
+      ['ENSG00000141510.17']) or unpatched (e.g., ['ENSG00000141510']). Matching
+      is done on unpatched IDs.
+
+  Returns:
+    A list of `genome.Interval`s for the given identifiers. The
+    returned list of intervals is in the same order as the input gene
+    identifiers.
+
+  Raises:
+    ValueError: If neither or both gene_symbols and gene_ids are set, or if no
+      interval or multiple intervals are found for any of the given gene
+      identifiers.
+  """
+  if (gene_symbols is None) == (gene_ids is None):
+    raise ValueError('Exactly one of gene_symbols or gene_ids must be set.')
+
+  gtf_genes = gtf[gtf['Feature'] == 'gene'].copy()
+
+  if gene_symbols is not None:
+    id_col = 'gene_name'
+    input_ids = gene_symbols
+    process_fn = lambda s: s.str.upper()
+  else:
+    id_col = 'gene_id'
+    input_ids = gene_ids
+    process_fn = lambda s: s.str.split('.', n=1).str[0]
+
+  processed_input_ids = process_fn(pd.Series(input_ids, dtype=str))
+  gtf_genes['processed_id'] = process_fn(gtf_genes[id_col])
+
+  # Filter the GTF to only the genes that are in the input IDs.
+  gtf_subset = gtf_genes[
+      gtf_genes['processed_id'].isin(processed_input_ids.unique())
+  ]
+
+  dup_mask = gtf_subset['processed_id'].duplicated(keep=False)
+  if dup_mask.any():
+    offending_ids = gtf_subset.loc[dup_mask, id_col].unique()
+    raise ValueError(
+        'Multiple intervals found for gene(s):'
+        f' {", ".join(sorted(offending_ids))}.'
+    )
+
+  # Create a lookup map from processed_id to GTF data.
+  # Use reindex to order genes by input and insert NaNs for missing genes.
+  gtf_map = gtf_subset.set_index('processed_id')
+  result_df = gtf_map.reindex(processed_input_ids)
+
+  missing_mask = result_df['Chromosome'].isnull()
+  if missing_mask.any():
+    missing_ids = pd.Series(input_ids)[missing_mask.values].unique()
+    raise ValueError(
+        f'No interval found for gene(s): {", ".join(sorted(missing_ids))}.'
+    )
+
+  # Add original identifiers to the result for the 'name' field of the interval.
+  result_df[id_col] = list(input_ids)
+
+  return [
+      genome.Interval(
+          chromosome=row.Chromosome,
+          start=row.Start,
+          end=row.End,
+          strand=row.Strand,
+          name=getattr(row, id_col),
+      )
+      for row in result_df.itertuples()
+  ]
+
+
 def get_gene_interval(
     gtf: pd.DataFrame,
     gene_symbol: str | None = None,
@@ -322,6 +405,9 @@ def get_gene_interval(
     gene_id: An Ensembl gene ID, which can be patched (e.g.
       'ENSG00000141510.17') or unpatched (e.g., 'ENSG00000141510').
 
+  Returns:
+    A `genome.Interval` for the given gene identifier.
+
   Raises:
     ValueError: If neither or both gene_symbol and gene_id are set, or if no
       interval or multiple intervals are found for the given gene identifier.
@@ -329,36 +415,8 @@ def get_gene_interval(
   if sum(x is not None for x in [gene_symbol, gene_id]) != 1:
     raise ValueError('Exactly one of gene_symbol or gene_id must be set.')
 
-  interval_info = pd.DataFrame()
-  if gene_symbol:
-    interval_info = gtf[
-        (gtf['Feature'] == 'gene')
-        & (gtf['gene_name'].str.upper() == gene_symbol.upper())
-    ]
-
-  elif gene_id:
-    # TODO: b/377291290 - just upstream the unpatching to the GTF loading.
-    if '.' not in gene_id:
-      gene_id_unpatched = gtf['gene_id'].str.split('.', expand=True)[0]
-      interval_info = gtf[
-          (gtf['Feature'] == 'gene') & (gene_id_unpatched == gene_id)
-      ]
-    else:
-      interval_info = gtf[
-          (gtf['Feature'] == 'gene') & (gtf['gene_id'] == gene_id)
-      ]
-
-  passed_id = gene_symbol or gene_id
-  if interval_info.shape[0] == 0:
-    raise ValueError(f'No interval found for gene "{passed_id}".')
-  elif interval_info.shape[0] > 1:
-    raise ValueError(f'Multiple intervals found for gene "{passed_id}".')
-  interval_info = interval_info.iloc[0]
-
-  return genome.Interval(
-      chromosome=interval_info['Chromosome'],
-      start=interval_info['Start'],
-      end=interval_info['End'],
-      strand=interval_info['Strand'],
-      name=passed_id,
-  )
+  return get_gene_intervals(
+      gtf,
+      [gene_symbol] if gene_symbol else None,
+      [gene_id] if gene_id else None,
+  )[0]
