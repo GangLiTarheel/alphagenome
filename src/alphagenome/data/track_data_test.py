@@ -675,6 +675,238 @@ class TrackDataTrackSubsetTest(parameterized.TestCase):
     self.assertEqual(tdata2_dict['bar'].width, tdata.width)
 
 
+class TrackDataGetItemTest(parameterized.TestCase):
+
+  def _get_test_data(self, num_positional: int):
+    shape = [4] * num_positional + [5] if num_positional > 0 else [5]
+    values = np.arange(np.prod(shape)).reshape(shape).astype(np.int32)
+    metadata = pd.DataFrame({
+        'name': ['a', 'b', 'c', 'c', 'd'],
+        'strand': ['.', '.', '-', '+', '.'],
+    })
+    interval = genome.Interval('chr1', 10, 14) if num_positional > 0 else None
+    return track_data.TrackData(
+        values, metadata, resolution=1, interval=interval
+    )
+
+  @parameterized.parameters([
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_positional_slice(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    sliced_tdata = tdata[1:3]
+    self.assertEqual(sliced_tdata.width, 2)
+    expected_shape = tuple([2] * num_positional + [5])
+    assert sliced_tdata.interval is not None
+    self.assertEqual(sliced_tdata.values.shape, expected_shape)
+    self.assertEqual(sliced_tdata.interval.start, 11)
+    self.assertEqual(sliced_tdata.interval.end, 13)
+
+    with self.assertRaises(IndexError):
+      _ = tdata[1:3:2]
+
+  @parameterized.parameters([
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_positional_interval(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    sub_interval = genome.Interval('chr1', 11, 13)
+    sliced_tdata = tdata[sub_interval]
+    self.assertEqual(sliced_tdata.width, 2)
+    expected_shape = tuple([2] * num_positional + [5])
+    assert sliced_tdata.interval is not None
+    self.assertEqual(sliced_tdata.values.shape, expected_shape)
+    self.assertEqual(sliced_tdata.interval, sub_interval)
+
+  @parameterized.parameters([
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_positional_int(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    sliced_tdata = tdata[1]
+    self.assertEqual(sliced_tdata.width, 1)
+    expected_shape = tuple([1] * num_positional + [5])
+    assert sliced_tdata.interval is not None
+    self.assertEqual(sliced_tdata.values.shape, expected_shape)
+    self.assertEqual(sliced_tdata.interval.start, 11)
+    self.assertEqual(sliced_tdata.interval.end, 12)
+
+  @parameterized.parameters([
+      dict(num_positional=0),
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_track_slice(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    # Full slice
+    sliced_tdata = tdata[:, :]
+    self.assertEqual(sliced_tdata.num_tracks, 5)
+    pd.testing.assert_frame_equal(sliced_tdata.metadata, tdata.metadata)
+    np.testing.assert_array_equal(sliced_tdata.values, tdata.values)
+
+    # Slice with stop
+    sliced_tdata = tdata[:, :4]
+    self.assertEqual(sliced_tdata.num_tracks, 4)
+    self.assertListEqual(list(sliced_tdata.names), ['a', 'b', 'c', 'c'])
+
+    # Slice with start
+    sliced_tdata = tdata[:, 1:]
+    self.assertEqual(sliced_tdata.num_tracks, 4)
+    self.assertListEqual(list(sliced_tdata.names), ['b', 'c', 'c', 'd'])
+
+    # Slice with start and stop
+    sliced_tdata = tdata[:, 1:4]
+    self.assertEqual(sliced_tdata.num_tracks, 3)
+    self.assertListEqual(list(sliced_tdata.names), ['b', 'c', 'c'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 3
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  def test_getitem_track_slice_with_no_positional(self):
+    tdata = self._get_test_data(0)
+    sliced_tdata = tdata[1:4]
+    self.assertEqual(sliced_tdata.num_tracks, 3)
+    self.assertListEqual(list(sliced_tdata.names), ['b', 'c', 'c'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 3
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  @parameterized.parameters([
+      dict(num_positional=0),
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_track_int(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    sliced_tdata = tdata[:, 1]
+    self.assertEqual(sliced_tdata.num_tracks, 1)
+    self.assertListEqual(list(sliced_tdata.names), ['b'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 1
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  @parameterized.parameters([
+      dict(num_positional=0),
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_track_indices(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    # List of ints
+    sliced_tdata = tdata[:, [0, 2, 4]]
+    self.assertEqual(sliced_tdata.num_tracks, 3)
+    self.assertListEqual(list(sliced_tdata.names), ['a', 'c', 'd'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 3
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+    # Numpy array of ints
+    sliced_tdata = tdata[:, np.array([0, 2, 4])]
+    self.assertEqual(sliced_tdata.num_tracks, 3)
+    self.assertListEqual(list(sliced_tdata.names), ['a', 'c', 'd'])
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  @parameterized.product(
+      [dict(num_positional=p) for p in [0, 1, 2]],
+      [
+          dict(
+              track_names=['a', 'd'],
+              expected_names=['a', 'd'],
+              expected_num_tracks=2,
+          ),
+          dict(
+              track_names=np.array(['a', 'd']),
+              expected_names=['a', 'd'],
+              expected_num_tracks=2,
+          ),
+          dict(
+              track_names=['c'],
+              expected_names=['c', 'c'],
+              expected_num_tracks=2,
+          ),
+          dict(
+              track_names=np.array(['c']),
+              expected_names=['c', 'c'],
+              expected_num_tracks=2,
+          ),
+      ],
+  )
+  def test_getitem_track_names(
+      self,
+      num_positional: int,
+      track_names: list[str] | np.ndarray,
+      expected_names: list[str],
+      expected_num_tracks: int,
+  ):
+    tdata = self._get_test_data(num_positional)
+    sliced_tdata = tdata[:, track_names]
+    self.assertEqual(sliced_tdata.num_tracks, expected_num_tracks)
+    self.assertListEqual(list(sliced_tdata.names), expected_names)
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = expected_num_tracks
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  @parameterized.parameters([
+      dict(num_positional=0),
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_track_name_str(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    # Single track
+    sliced_tdata = tdata[:, 'a']
+    self.assertEqual(sliced_tdata.num_tracks, 1)
+    self.assertListEqual(list(sliced_tdata.names), ['a'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 1
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+    # Duplicated track name
+    sliced_tdata = tdata[:, 'c']
+    self.assertEqual(sliced_tdata.num_tracks, 2)
+    self.assertListEqual(list(sliced_tdata.names), ['c', 'c'])
+    expected_shape = list(tdata.values.shape)
+    expected_shape[-1] = 2
+    self.assertEqual(sliced_tdata.values.shape, tuple(expected_shape))
+
+  @parameterized.parameters([
+      dict(num_positional=1),
+      dict(num_positional=2),
+  ])
+  def test_getitem_combined(self, num_positional: int):
+    tdata = self._get_test_data(num_positional)
+    # Positional slice and track name list
+    sliced_tdata = tdata[1:3, ['a', 'c']]
+    self.assertEqual(sliced_tdata.width, 2)
+    self.assertEqual(sliced_tdata.num_tracks, 3)  # 'c' is duplicated
+    self.assertListEqual(list(sliced_tdata.names), ['a', 'c', 'c'])
+    expected_shape = tuple([2] * num_positional + [3])
+    self.assertEqual(sliced_tdata.values.shape, expected_shape)
+    assert sliced_tdata.interval is not None
+    self.assertEqual(sliced_tdata.interval.start, 11)
+    self.assertEqual(sliced_tdata.interval.end, 13)
+
+  def test_getitem_errors(self):
+    # pytype: disable=unsupported-operands
+    tdata = self._get_test_data(1)
+    with self.assertRaises(IndexError):
+      _ = tdata[1.0]
+    with self.assertRaises(IndexError):
+      _ = tdata[:, 1.0]
+    with self.assertRaises(IndexError):
+      _ = tdata[1:4:2, :]
+    with self.assertRaises(IndexError):
+      _ = tdata['a']  # string is not supported for positional
+    # pytype: enable=unsupported-operands
+
+    tdata = self._get_test_data(0)
+    with self.assertRaises(IndexError):
+      _ = tdata[genome.Interval('chr1', 10, 14)]
+
+
 class TrackDataReverseComplementTest(parameterized.TestCase):
 
   @parameterized.parameters([

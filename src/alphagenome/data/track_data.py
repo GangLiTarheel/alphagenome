@@ -31,6 +31,9 @@ import pandas as pd
 # Required columns: name, strand.
 # Optional standardized columns: cell_type, assay, padding.
 TrackMetadata = pd.DataFrame
+PositionalIndex = slice | genome.Interval | int
+TrackIndex = np.ndarray | Sequence[int] | Sequence[str] | slice | int | str
+Index = PositionalIndex | tuple[PositionalIndex, TrackIndex] | TrackIndex
 
 
 @enum.unique
@@ -527,6 +530,86 @@ class TrackData:
     """
     track_idx = pd.Series(np.arange(self.num_tracks), index=self.names)
     return self.select_tracks_by_index(track_idx.loc[names].values)
+
+  def __getitem__(self, index: Index) -> 'TrackData':
+    """Retrieves a subset of TrackData using positional and/or track indices.
+
+    This method allows slicing `TrackData` similar to numpy arrays or pandas
+    DataFrames. The index can be a single value or a tuple.
+
+    Args:
+      index: A single index or a tuple of indices. If a single index, it's
+        treated as a positional index if the `TrackData` has positional axes,
+        otherwise as a track index. If a tuple, the first element specifies the
+        positional slice, and the second element specifies the track index.
+        Positional indices can be `int`, `slice`, or `genome.Interval`, and this
+        slice is applied to all positional axes of the `values` array. Track
+        indices can be `int`, `str` (track name), `slice`, `Sequence[int]`, or
+        `Sequence[str]` (track names).
+
+    Returns:
+      A new `TrackData` object containing the selected subset.
+
+    Raises:
+      IndexError: If a slice step is not 1 for positional indexing.
+      IndexError: If an unsupported index type is provided.
+    """
+    if isinstance(index, tuple):
+      position_index, track_index = index
+    elif self.positional_axes:
+      position_index, track_index = index, None
+    else:
+      position_index, track_index = None, index
+      if isinstance(track_index, genome.Interval):
+        raise IndexError(
+            'Track indexing by interval is supported only when there are'
+            ' positional axes.'
+        )
+
+    tdata = self
+    match position_index:
+      case None:
+        pass
+      case int():
+        tdata = tdata.slice_by_positions(position_index, position_index + 1)
+      case slice():
+        if position_index.step is not None and position_index.step != 1:
+          raise IndexError('Slice step must be 1 for positional indexing.')
+        if position_index != slice(None):
+          tdata = tdata.slice_by_positions(
+              position_index.start, position_index.stop
+          )
+      case genome.Interval():
+        tdata = tdata.slice_by_interval(position_index)
+      case _:
+        raise IndexError(
+            f'Unsupported positional index type: {type(position_index)}'
+        )
+
+    match track_index:
+      case None:
+        pass
+      case str():
+        tdata = tdata.select_tracks_by_name([track_index])
+      case int():
+        tdata = tdata.select_tracks_by_index([track_index])
+      case slice():
+        if track_index != slice(None):
+          indices = np.arange(tdata.num_tracks)[track_index]
+          tdata = tdata.select_tracks_by_index(indices)
+      case np.ndarray() if np.issubdtype(track_index.dtype, np.character):
+        tdata = tdata.select_tracks_by_name(track_index)
+      case np.ndarray():
+        tdata = tdata.select_tracks_by_index(track_index)
+      case Sequence():
+        track_index_arr = np.asarray(track_index)
+        if np.issubdtype(track_index_arr.dtype, np.character):
+          tdata = tdata.select_tracks_by_name(track_index_arr)
+        else:
+          tdata = tdata.select_tracks_by_index(track_index_arr)
+      case _:
+        raise IndexError(f'Unsupported track index type: {type(track_index)}')
+    return tdata
 
   def groupby(self, column: str) -> dict[str, 'TrackData']:
     """Splits tracks into groups based on a metadata column.
