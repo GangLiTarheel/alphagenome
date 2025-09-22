@@ -28,9 +28,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install alphagenome with dependencies
+      - name: Install hatch
         run: |
-            python -m pip install -U pip hatch
+            # Remove click version constraint once
+            # https://github.com/pypa/hatch/issues/2050 resolved.
+            python -m pip install -U pip hatch "click<8.3"
       - name: Check
         run: python -m hatch run check:all
       - name: Unit tests
