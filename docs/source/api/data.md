@@ -53,6 +53,17 @@ Classes and utilities for manipulating genomics data.
     data.gene_annotation.get_gene_intervals
 ```
 
+## Junction data
+
+``` {eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
+    data.junction_data.JunctionData
+    data.junction_data.get_junctions_to_plot
+```
+
 ## Ontology
 
 ``` {eval-rst}
