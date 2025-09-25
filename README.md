@@ -192,7 +192,9 @@ Copyright 2024 Google LLC
 All software in this repository is licensed under the Apache License, Version
 2.0 (Apache 2.0); you may not use this except in compliance with the Apache 2.0
 license. You may obtain a copy of the Apache 2.0 license at:
-https://www.apache.org/licenses/LICENSE-2.0.
+https://www.apache.org/licenses/LICENSE-2.0. For the avoidance of doubt, as
+noted above, the API is offered free of charge for non-commercial use subject to
+the [Terms of Use](https://deepmind.google.com/science/alphagenome/terms).
 
 Examples and documentation to help you use the AlphaGenome API are licensed
 under the Creative Commons Attribution 4.0 International License (CC-BY). You
